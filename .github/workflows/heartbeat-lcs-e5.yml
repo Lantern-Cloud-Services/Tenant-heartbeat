@@ -1,0 +1,29 @@
+name: Weekly heartbeat - LCS E5
+
+on:
+  schedule:
+    # Every Monday at 03:30 UTC
+    - cron: '30 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      what_if:
+        description: Run a what-if preview instead of an actual deployment.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: heartbeat-lcs-e5
+  cancel-in-progress: false
+
+jobs:
+  heartbeat:
+    uses: ./.github/workflows/heartbeat.yml
+    with:
+      tenant_nickname: LCS E5
+      environment: lcs-e5
+      what_if: ${{ inputs.what_if == true }}
