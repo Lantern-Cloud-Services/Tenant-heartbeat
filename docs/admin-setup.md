@@ -57,16 +57,30 @@ Write-Host "AZURE_CLIENT_ID = $APP_ID"
 Federated credentials tell Entra ID exactly which GitHub workflow may sign in. Scope them
 to the **environment** so only the heartbeat job for that tenant can use the identity.
 
+> **Immutable subject claims:** GitHub now issues OIDC tokens whose `sub` claim embeds the
+> immutable numeric IDs of the organization and repository, e.g.
+> `repo:org-name@org-id/repo-name@repo-id:environment:env-name`, instead of the legacy
+> `repo:org-name/repo-name:environment:env-name` format. If the federated credential's
+> `subject` uses the legacy format while GitHub emits the immutable one (or vice versa),
+> sign-in fails with `AADSTS700213`. Build the subject from the IDs below so it matches
+> what GitHub actually sends.
+
 ```powershell
 # Set this to the environment you are configuring right now: either lcs-p3 or lcs-e5.
 # Use one value only. Do not paste the literal text "<lcs-p3|lcs-e5>".
 $ENVIRONMENT = "lcs-p3"   # or "lcs-e5"
 
+$GH_OWNER    = $GH_REPO.Split("/")[0]
+$GH_REPONAME = $GH_REPO.Split("/")[1]
+$OWNER_ID    = (gh api "repos/$GH_REPO" --jq ".owner.id").Trim()
+$REPO_ID     = (gh api "repos/$GH_REPO" --jq ".id").Trim()
+$SUBJECT     = "repo:${GH_OWNER}@${OWNER_ID}/${GH_REPONAME}@${REPO_ID}:environment:$ENVIRONMENT"
+
 @"
 {
   "name": "github-env-$ENVIRONMENT",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:$GH_REPO:environment:$ENVIRONMENT",
+  "subject": "$SUBJECT",
   "audiences": ["api://AzureADTokenExchange"]
 }
 "@ | Set-Content -Path fic.json -Encoding ascii
@@ -79,6 +93,12 @@ az ad app federated-credential create --id $APP_ID --parameters '@fic.json'
 
 That single credential covers both the weekly schedule and manual runs, because the job
 always targets the environment.
+
+> If the repository or organization was created (or renamed/transferred) before GitHub's
+> immutable subject claim rollout and has **not** opted in, GitHub still emits the legacy
+> `repo:owner/repo:environment:env` subject — check **Settings → Actions → General → OIDC**
+> (or `gh api repos/$GH_REPO/actions/oidc/customization/sub`) to confirm which format is
+> active for this repository before creating the credential, and use that exact format.
 
 ---
 
@@ -193,7 +213,7 @@ After verification the workflows run automatically every Monday (03:00 UTC for L
 
 | Symptom | Cause / fix |
 | --- | --- |
-| `AADSTS70021: No matching federated identity record found` | The `subject` in step 2 must exactly match `repo:<owner>/<repo>:environment:<environment>` (case-sensitive). |
+| `AADSTS700213: No matching federated identity record found` (or `AADSTS70021`) | The federated credential's `subject` doesn't match the `sub` claim GitHub actually sent. Compare the "subject claim" logged by `azure/login` in the failed run against the credential in Azure — it must match exactly (case-sensitive), including whether GitHub is using the legacy `repo:<owner>/<repo>:environment:<environment>` format or the immutable `repo:<owner>@<ownerId>/<repo>@<repoId>:environment:<environment>` format (see step 2). |
 | `Environment variable 'X' is not configured` | A variable from step 4 is missing on that environment. |
 | `AuthorizationFailed` on deployment | Role assignment from step 3 missing, or scoped to the wrong subscription. |
 | Scheduled runs stop firing | GitHub disables schedules in repos with no activity for 60 days — push a commit or re-enable the workflow. |
