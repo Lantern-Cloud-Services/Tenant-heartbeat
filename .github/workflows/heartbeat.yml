@@ -1,0 +1,95 @@
+name: Heartbeat deployment (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      tenant_nickname:
+        description: Nickname of the target tenant (e.g. "LCS P3").
+        required: true
+        type: string
+      environment:
+        description: GitHub environment holding the tenant's credentials and variables.
+        required: true
+        type: string
+      what_if:
+        description: Run a what-if preview instead of an actual deployment.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  heartbeat:
+    name: ${{ inputs.tenant_nickname }} heartbeat
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate required configuration
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          RESOURCE_GROUP_NAME: ${{ vars.RESOURCE_GROUP_NAME }}
+          LOCATION: ${{ vars.LOCATION }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID RESOURCE_GROUP_NAME LOCATION; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Environment variable '$name' is not configured for environment '${{ inputs.environment }}'."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Sign in to Azure (OIDC, no stored secrets)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy heartbeat resource group
+        env:
+          SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          LOCATION: ${{ vars.LOCATION }}
+          RESOURCE_GROUP_NAME: ${{ vars.RESOURCE_GROUP_NAME }}
+          TENANT_NICKNAME: ${{ inputs.tenant_nickname }}
+          WHAT_IF: ${{ inputs.what_if }}
+        run: |
+          set -euo pipefail
+          mode="create"
+          if [ "$WHAT_IF" = "true" ]; then
+            mode="what-if"
+          fi
+          az deployment sub "$mode" \
+            --name "heartbeat-$(date -u +%Y%m%d%H%M%S)" \
+            --subscription "$SUBSCRIPTION_ID" \
+            --location "$LOCATION" \
+            --template-file infra/heartbeat.bicep \
+            --parameters \
+              resourceGroupName="$RESOURCE_GROUP_NAME" \
+              location="$LOCATION" \
+              tenantNickname="$TENANT_NICKNAME"
+
+      - name: Summarise run
+        if: always()
+        env:
+          RESOURCE_GROUP_NAME: ${{ vars.RESOURCE_GROUP_NAME }}
+          LOCATION: ${{ vars.LOCATION }}
+        run: |
+          {
+            echo "### Heartbeat: ${{ inputs.tenant_nickname }}"
+            echo ""
+            echo "- Environment: \`${{ inputs.environment }}\`"
+            echo "- Resource group: \`${RESOURCE_GROUP_NAME}\`"
+            echo "- Location: \`${LOCATION}\`"
+            echo "- Mode: \`${{ inputs.what_if && 'what-if' || 'deploy' }}\`"
+            echo "- Result: \`${{ job.status }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
