@@ -58,7 +58,9 @@ Federated credentials tell Entra ID exactly which GitHub workflow may sign in. S
 to the **environment** so only the heartbeat job for that tenant can use the identity.
 
 ```powershell
-$ENVIRONMENT = "<lcs-p3|lcs-e5>"
+# Set this to the environment you are configuring right now: either lcs-p3 or lcs-e5.
+# Use one value only. Do not paste the literal text "<lcs-p3|lcs-e5>".
+$ENVIRONMENT = "lcs-p3"   # or "lcs-e5"
 
 @"
 {
@@ -135,7 +137,9 @@ All values below are non-secret identifiers, so they are stored as **environment
 variables** (not secrets) — this keeps logs readable and avoids secret sprawl.
 
 ```powershell
-$ENVIRONMENT = "<lcs-p3|lcs-e5>"
+# Set this to the environment you are configuring right now: either lcs-p3 or lcs-e5.
+# Use one value only. Do not paste the literal text "<lcs-p3|lcs-e5>".
+$ENVIRONMENT = "lcs-p3"   # or "lcs-e5"
 
 gh api -X PUT "repos/$GH_REPO/environments/$ENVIRONMENT" | Out-Null
 
